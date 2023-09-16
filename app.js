@@ -427,11 +427,11 @@ app.post("/api/addAdvertisement", (req,res) =>{
   });
   
 
-//get All advertisement
+//get All advertisements
 app.get("/api/getAllAdvertisement", (req, res) => {
   const sqlInsert2 = "select * from advertisement;";
 
-  db.query(sqlInsert2,[id], (err, result) => {
+  db.query(sqlInsert2,[], (err, result) => {
     if (err) {
       console.log(err);
     } else {
@@ -465,7 +465,7 @@ app.put("/api/editAd", (req, res) => {
   const sqlInsert1 = "update adevertisement set img_path=? ,city=?, description=?,email=?, language=?, mobile=?,name=?, subject=?,type=?, state=?  where id=?;";
   db.query(sqlInsert1, [data.img_path, 
     data.city, data.description, data.email,data.language,data.mobile,data.name,data.subject, 
-    data.type,data.state,  data.advertisement_id], (err, result) => {
+    data.type,data.state,  data.advertisement_id,data.id], (err, result) => {
       if (err) {
         console.log(err);
       } else {
@@ -517,7 +517,7 @@ app.put("/api/editDoubt", (req, res) => {
   
   const sqlInsert1 = "update doubt set description=?, img_path=? ,city=?, topic=?  where id=?;";
   db.query(sqlInsert1, [data.description,data.img_path, 
-    data.city,data.city,data.topic], (err, result) => {
+    data.city,data.city,data.topic,data.id], (err, result) => {
       if (err) {
         console.log(err);
       } else {
@@ -567,7 +567,7 @@ app.put("/api/editAnswer", (req, res) => {
   
   const sqlInsert1 = "update answer set description=?, img_path=? ,city=?, voice_path=?  where id=?;";
   db.query(sqlInsert1, [data.description,data.img_path, 
-    data.city,data.city,data.topic], (err, result) => {
+    data.city,data.city,data.topic,data.id], (err, result) => {
       if (err) {
         console.log(err);
       } else {
@@ -633,8 +633,7 @@ app.put("/api/editGroup", (req, res) => {
   const data = req.body.data; // send data as data: blah blah blah
   
   const sqlInsert1 = "update group set name=?  where id=?;";
-  db.query(sqlInsert1, [data.description,data.img_path, 
-    data.city,data.city,data.topic], (err, result) => {
+  db.query(sqlInsert1, [data.name,data.group_id], (err, result) => {
       if (err) {
         console.log(err);
       } else {
@@ -685,7 +684,7 @@ app.put("/api/editSubtopic", (req, res) => {
   
   const sqlInsert1 = "update sub_topic set file_path=?, file_type=?, course_id=?  where id=?;";
   db.query(sqlInsert1, [data.file_path,data.file_type, 
-    data.course_id], (err, result) => {
+    data.course_id, data.subtopic_id], (err, result) => {
       if (err) {
         console.log(err);
       } else {
@@ -718,12 +717,18 @@ app.delete("/api/deleteSubtopic", (req, res) => {
 
 
 //create teacher
-app.post("/api/", (req,res) =>{
+app.post("/api/createTeacher", (req,res) =>{
   const data = req.body.data;
   
-  const sqlInsert = "Insert into student(user_id) values (?)" ;
+  const sqlInsert = "Insert into teacher(qualification,city,mobile_no,nic,status,user_id) values (?,?,?,?,?,?)" ;
   
-  db.query(sqlInsert,[data.user_id], (err, result) => {
+  db.query(sqlInsert,[
+    data.qualification,
+    data.city,
+    data.mobile_no,
+    data.nic,
+    data.status,
+    data.user_id], (err, result) => {
     if (err) {
       console.log(err);
     } else {
@@ -734,7 +739,40 @@ app.post("/api/", (req,res) =>{
   });
 
 
-
+// Edit user
+app.put("/api/editUser", (req, res) => {
+  const data = req.body.data; // Send data as data: blah blah blah
+  
+  const sqlUpdateUser = "UPDATE user SET email=?, name=?, password=?, role=?, username=? WHERE id=?;";
+  db.query(sqlUpdateUser, [data.email, data.name, data.password, data.role, data.username, data.user_id], (err, result) => {
+    if (err) {
+      console.log(err);
+      res.status(500).send("Error updating user.");
+    } else {
+      if (data.role === "teacher") {
+        const sqlUpdateTeacher = "update teacher set qualification= ? ,city=?,mobile_no=?,nic=?,status=? WHERE user_id=?;";
+        db.query(sqlUpdateTeacher, [
+          data.qualification,
+          data.city,
+          data.mobile_no,
+          data.nic,
+          data.status,
+          data.user_id], (err, teacherResult) => {
+          if (err) {
+            console.log(err);
+            res.status(500).send("Error updating teacher details.");
+          } else {
+            console.log("User and teacher details updated successfully.");
+            res.send(teacherResult);
+          }
+        });
+      } else {
+        console.log("User details updated successfully.");
+        res.send(result);
+      }
+    }
+  });
+});
 
 
 
