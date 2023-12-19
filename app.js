@@ -72,6 +72,7 @@ app.post("/api/signup", (req, res) => {
 
   const sqlCheckEmail = "SELECT * FROM user WHERE email = ?;";
   const sqlCheckUsername = "SELECT * FROM user WHERE username = ?;";
+  const role = "Student";
 
   // Check if email is already taken
   db.query(sqlCheckEmail, [data.email], (errEmail, resultEmail) => {
@@ -91,10 +92,10 @@ app.post("/api/signup", (req, res) => {
             } else {
               // Neither email nor username is taken, proceed with registration
               const sqlInsertUser =
-                "INSERT INTO user (email, name, password, role, state, username) VALUES (?, ?, ?, ?, ?, ?);";
+                "INSERT INTO user (email, name, password, state, username) VALUES (?, ?, ?, ?, ?);";
               db.query(
                 sqlInsertUser,
-                [data.email, data.name, data.password, data.role, data.state, data.username],
+                [data.email, data.name, data.password, role, data.state, data.username],
                 (errInsert, resultInsert) => {
                   if (errInsert) {
                     console.log(errInsert);
@@ -148,9 +149,72 @@ app.get("/api/userCount", (req, res) => {
   });
 });
 
+//make user inactive
+app.put("/api/userInactive", (req, res) => {
+  const data = req.body.data; // send data as data: blah blah blah
+  
+  const sqlInsert1 = "update user set state='INACTIVE'  where id=?;";
+  db.query(sqlInsert1, [data.user_id], (err, result) => {
+      if (err) {
+        console.log(err);
+      } else {
+        res.send(result);
+        console.log(result);
+      }
+    }
+  );
+});
+
+//get student info
+app.get("/api/students", (req, res) => {
+  const sqlInsert2 = "select * from user where role='Student';";
+
+  db.query(sqlInsert2, (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
+
+
+//get teacher info
+app.get("/api/teachers", (req, res) => {
+  const sqlInsert2 = "SELECT user.*, teacher.* FROM user JOIN teacher ON user.id = teacher.user_id WHERE user.role = 'Teacher';";
+
+  db.query(sqlInsert2, (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
+
+
+
+//verify teacher
+app.put("/api/verifyTeacher/:id", (req, res) => {
+  const id = req.params.id;
+  
+  const sqlInsert1 = "update teacher set verified=1  where id=?;";
+  db.query(sqlInsert1, [id], (err, result) => {
+      if (err) {
+        console.log(err);
+      } else {
+        res.send(result);
+        console.log(result);
+      }
+    }
+  );
+});
+
 //get All Courses
 app.get("/api/allCourses", (req, res) => {
-  const sqlInsert2 = "select * from course;";
+  const sqlInsert2 = "select course.*,user.name from course Inner join teacher on course.teacher_id=teacher.id Inner Join user on teacher.user_id=user.id;";
 
   db.query(sqlInsert2, (err, result) => {
     if (err) {
@@ -561,7 +625,7 @@ app.post("/api/addAnswer", (req,res) =>{
   });
   });
 
-//edit doubt
+//edit answer
 app.put("/api/editAnswer", (req, res) => {
   const data = req.body.data; // send data as data: blah blah blah
   
@@ -579,7 +643,7 @@ app.put("/api/editAnswer", (req, res) => {
 });
 
 
-//deleteDoubt
+//delete Answer
 app.delete("/api/deleteAnswer", (req, res) => {
   const data = req.body.data;
   const sqlInsert2 = "delete  from  answer where id= ?;";
@@ -660,14 +724,27 @@ app.delete("/api/deleteGroup", (req, res) => {
   });
 });
 
+//get All Sub topic
+app.get("/api/subTopic", (req, res) => {
+  const sqlInsert2 = "select sub_topic.*,course.title,course.id as courseName from sub_topic Inner join course on course.id=sub_topic.course_id;";
+
+  db.query(sqlInsert2, (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
 
 //add subtopic
 app.post("/api/addSubtopic", (req,res) =>{
   const data = req.body.data;
   
-  const sqlInsert = "Insert into sub_topic(file_path,file_type,course_id) values (?,?,?)" ;
+  const sqlInsert = "Insert into sub_topic(title,file_path,file_type,course_id) values (?,?,?)" ;
   
-  db.query(sqlInsert,[data.file_path,data.file_type,data.course_id], (err, result) => {
+  db.query(sqlInsert,[data.title,data.file_path,data.file_type,data.course_id], (err, result) => {
     if (err) {
       console.log(err);
     } else {
@@ -682,8 +759,8 @@ app.post("/api/addSubtopic", (req,res) =>{
 app.put("/api/editSubtopic", (req, res) => {
   const data = req.body.data; // send data as data: bla h blah blah
   
-  const sqlInsert1 = "update sub_topic set file_path=?, file_type=?, course_id=?  where id=?;";
-  db.query(sqlInsert1, [data.file_path,data.file_type, 
+  const sqlInsert1 = "update sub_topic set title=?,file_path=?, file_type=?, course_id=?  where id=?;";
+  db.query(sqlInsert1, [data.title,data.file_path,data.file_type, 
     data.course_id, data.subtopic_id], (err, result) => {
       if (err) {
         console.log(err);
@@ -716,27 +793,71 @@ app.delete("/api/deleteSubtopic", (req, res) => {
 
 
 
+// //create teacher
+// app.post("/api/createTeacher", (req,res) =>{
+//   const data = req.body.data;
+  
+//   const sqlInsert = "Insert into teacher(qualification,city,mobile_no,nic,status,user_id) values (?,?,?,?,?,?)" ;
+  
+//   db.query(sqlInsert,[
+//     data.qualification,
+//     data.city,
+//     data.mobile_no,
+//     data.nic,
+//     data.status,
+//     data.user_id], (err, result) => {
+//     if (err) {
+//       console.log(err);
+//     } else {
+//       res.send(result);
+//       console.log(result);
+//     }
+//   });
+//   });
+
+
+
 //create teacher
-app.post("/api/createTeacher", (req,res) =>{
-  const data = req.body.data;
+  app.post("/api/createTeacher", (req, res) => {
+    const userData = req.body.data;
+    const role = "Teacher";
+    const uname = userData.name + "Teach";
   
-  const sqlInsert = "Insert into teacher(qualification,city,mobile_no,nic,status,user_id) values (?,?,?,?,?,?)" ;
+    // Create a new user first
+    const userInsert = "INSERT INTO user (username, name, password, email,state, role) VALUES (?, ?, ?, ,?, ?, ?)";
   
-  db.query(sqlInsert,[
-    data.qualification,
-    data.city,
-    data.mobile_no,
-    data.nic,
-    data.status,
-    data.user_id], (err, result) => {
-    if (err) {
-      console.log(err);
-    } else {
-      res.send(result);
-      console.log(result);
-    }
+    db.query(userInsert, [uname,userData.name, userData.password, userData.email,userData.state, role], (userErr, userResult) => {
+      if (userErr) {
+        console.log(userErr);
+        res.status(500).send("Error creating user");
+      } else {
+        // Use the generated user_id to create a teacher
+        const user_id = userResult.insertId;
+        const teacherData = req.body.data;
+  
+        const teacherInsert = "INSERT INTO teacher (qualification, city,subject, mobile_no, nic,verified, user_id) VALUES (?, ?, ?, ?, ?, ?,?)";
+  
+        db.query(teacherInsert, [
+          teacherData.qualification,
+          teacherData.city,
+          teacherData.subject,
+          teacherData.mobile_no,
+          teacherData.nic,
+          0,
+          user_id, // Use the generated user_id
+        ], (teacherErr, teacherResult) => {
+          if (teacherErr) {
+            console.log(teacherErr);
+            res.status(500).send("Error creating teacher");
+          } else {
+            res.send(teacherResult);
+            console.log(teacherResult);
+          }
+        });
+      }
+    });
   });
-  });
+  
 
 
 // Edit user
