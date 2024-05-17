@@ -135,7 +135,38 @@ app.get("/api/user/:email/:password", (req, res) => {
   });
 });
 
+//get User by email and password for teacher or admin
+app.get("/api/userA/:email/:password", (req, res) => {
+  console.log(req.params.email);
+  const email = req.params.email;
+  const password = req.params.password;
+  console.log(email);
 
+  const sqlQuery = "SELECT user.*,teacher.verified as verified FROM user Left join teacher on user.id = teacher.user_id WHERE email = ? AND password = ? AND (role = 'teacher' OR role = 'admin')";
+
+  db.query(sqlQuery, [email, password], (err, result) => {
+    if (err) {
+      console.log(err);
+      res.status(500).send("Error retrieving user data.");
+    } else {
+      // Check if any user records are found
+      if (result.length === 0) {
+        // No user found with provided email, password, and role 'teacher' or 'admin'
+        res.status(401).send("Unauthorized: Invalid email or password");
+      } else {
+        // User found, check if the role is 'teacher' and verified
+        const user = result[0];
+        console.log(user);
+        if (user.role == 'Teacher' && user.verified == 0) {
+          res.status(403).send("Forbidden: You're not yet verified as a teacher.");
+        } else {
+          // Authorized user
+          res.status(200).send(result);
+        }
+      }
+    }
+  });
+});
 
 //get User count
 app.get("/api/userCount", (req, res) => {
@@ -170,7 +201,7 @@ app.get("/api/CourseCount", (req, res) => {
 
 //get Student count
 app.get("/api/studentCount", (req, res) => {
-  const sqlInsert2 = "select count(id) as studentCount from student;";
+  const sqlInsert2 = "select count(id) as studentCount from user where role = 'student';";
 
   db.query(sqlInsert2, (err, result) => {
     if (err) {
@@ -274,9 +305,79 @@ app.get("/api/allCourses", (req, res) => {
   });
 });
 
-//get All Courses
+app.get("/api/allCoursesV1", (req, res) => {
+  let sqlQuery = "SELECT course.*, user.name,( SELECT AVG(rating) FROM rating  WHERE rating.course_id = course.id  ) AS avg_rating, (Select Count(*) FROM enrolment where enrolment.course_id =course.id) AS enrolmentCount,( SELECT Count(rating) FROM rating  WHERE rating.course_id = course.id  ) AS ratingCount FROM course INNER JOIN teacher ON course.teacher_id = teacher.id INNER JOIN user ON teacher.user_id = user.id";
+
+  // Extract query parameters from the request object
+  const { subject, language, sortBy, searchTerm } = req.query;
+
+  // Construct the WHERE clause based on the selected dropdown values
+  let whereClause = [];
+  if (subject && subject !== 'all') {
+    whereClause.push(`course.subject = '${subject}'`);
+  }
+  if (language && language !== 'all') {
+    whereClause.push(`course.language = '${language}'`);
+  }
+
+  const currentYear = new Date().getFullYear();
+  const previousYear = currentYear - 1;
+  whereClause.push(`SUBSTRING(course.updated_date, 1, 4) IN ('${currentYear}', '${previousYear}')`);
+
+  if (searchTerm) {
+    whereClause.push(`(course.title LIKE '%${searchTerm}%' OR course.subject LIKE '%${searchTerm}%' OR course.language LIKE '%${searchTerm}%')`);
+  }
+
+  // Add the WHERE clause to the SQL query if any filters are applied
+  if (whereClause.length > 0) {
+    sqlQuery += " WHERE " + whereClause.join(" AND ");
+  }
+
+  // Append the ORDER BY clause based on the selected sorting option
+  if (sortBy === "lowest") {
+    sqlQuery += " ORDER BY course.amount ASC";
+  } else if (sortBy === "highest") {
+    sqlQuery += " ORDER BY course.amount DESC";
+  } else if (sortBy === "toprated") {
+    sqlQuery += " ORDER BY avg_rating DESC";
+  } 
+  else if (sortBy === "popular") {
+    sqlQuery += " ORDER BY enrolmentCount DESC";
+  } else {
+    // Default sorting by course ID or any other default criteria
+    sqlQuery += " ORDER BY course.id DESC";
+  }
+
+  // Execute the constructed SQL query
+  db.query(sqlQuery, (err, result) => {
+    if (err) {
+      console.log(err);
+      res.status(500).send("Internal Server Error");
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
+
+//get All recent Courses
 app.get("/api/raddCourses", (req, res) => {
   const sqlInsert2 = "select course.*,user.name from course Inner join teacher on course.teacher_id=teacher.id Inner Join user on teacher.user_id=user.id ORDER BY course.id DESC LIMIT 3;";
+
+  db.query(sqlInsert2, (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
+
+
+//get All pouplar Courses
+app.get("/api/mostEnroled", (req, res) => {
+  const sqlInsert2 = " Select (Select Count(*) FROM enrolment where enrolment.course_id =course.id) AS enrolmentCount ,course.*,user.name from course Inner join teacher on course.teacher_id=teacher.id Inner Join user on teacher.user_id=user.id WHERE STR_TO_DATE(course.updated_date, '%Y-%m-%d') >= DATE_SUB(NOW(), INTERVAL 2 YEAR) ORDER BY enrolmentCount DESC LIMIT 4;";
 
   db.query(sqlInsert2, (err, result) => {
     if (err) {
@@ -306,7 +407,7 @@ app.get("/api/courseForTeacher/:id", (req, res) => {
 //get All Courses For a Teacher
 app.get("/api/allcoursesForTeacher/:id", (req, res) => {
   const id = req.params.id;
-  const sqlInsert2 = "select course.*,user.name from course Inner join teacher on course.teacher_id=teacher.id Inner Join user on teacher.user_id=user.id where teacher.user_id = ?;";
+  const sqlInsert2 = "SELECT course.*, user.name,( SELECT AVG(rating) FROM rating  WHERE rating.course_id = course.id  ) AS avg_rating,( SELECT Count(rating) FROM rating  WHERE rating.course_id = course.id  ) AS ratingCount, (Select Count(*) FROM enrolment where enrolment.course_id =course.id) AS enrolmentCount FROM course INNER JOIN teacher ON course.teacher_id = teacher.id INNER JOIN user ON teacher.user_id = user.id where teacher.user_id = ?;";
 
   db.query(sqlInsert2,[id], (err, result) => {
     if (err) {
@@ -357,6 +458,43 @@ app.put("/api/editCourse", (req, res) => {
   );
 });
 
+//delete course
+// delete course
+app.delete("/api/deleteCourse/:id", (req, res) => {
+  const courseId = req.params.id;
+
+  // Check if there are any enrollments for the course
+  const sqlCheckEnrollments = "SELECT COUNT(*) AS numEnrollments FROM enrolment WHERE course_id = ?";
+
+  db.query(sqlCheckEnrollments, [courseId], (err, enrollmentResult) => {
+    if (err) {
+      console.log(err);
+      res.status(500).send("Error checking enrollments.");
+    } else {
+      const numEnrollments = enrollmentResult[0].numEnrollments;
+
+      // If there are no enrollments, delete the course
+      if (numEnrollments === 0) {
+        const sqlDeleteCourse = "DELETE FROM course WHERE id = ?";
+
+        db.query(sqlDeleteCourse, [courseId], (deleteErr, deleteResult) => {
+          if (deleteErr) {
+            console.log(deleteErr);
+            res.status(500).send("Error deleting course.");
+          } else {
+            res.status(200).send("Course deleted successfully.");
+            console.log("Course deleted successfully.");
+          }
+        });
+      } else {
+        res.status(403).send("Cannot delete course with existing enrolments.");
+      }
+    }
+  });
+});
+
+
+
 //get a specific Course
 app.get("/api/course", (req, res) => {
   const data =  req.body.data;
@@ -399,9 +537,38 @@ app.post("/api/saveEnrolment", (req, res) => {
   );
 });
 
+//edit Enrolment
+app.put("/api/ediEnrolment", (req, res) => {
+  const data = req.body.data;
+  console.log(req);
+  const formattedDate = getDate();
+
+  const sqlInsert2 =
+    "update enrolment set enroled_date = ? , course_id = ?, user_id= ? where id= ?;";
+
+  db.query(
+    sqlInsert2,
+    [
+      formattedDate,
+      data.course_id,
+      data.user_id,
+      data.enrolment_id
+    ],
+    (err, result) => {
+      if (err) {
+        console.log(err);
+      } else {
+        res.send(result);
+        console.log(result);
+      }
+    }
+  );
+});
+
+
 //get All Enrolments
 app.get("/api/getAllEnrolments", (req, res) => {
-  const sqlInsert2 = "select course.title,user.name as tname,enrolment.enroled_date,s.name as sname from enrolment left join course on course.id= enrolment.course_id Inner join teacher on course.teacher_id=teacher.id Inner Join user on teacher.user_id=user.id Inner Join user as s on enrolment.user_id = s.id;";
+  const sqlInsert2 = "select course.title,course.id,user.name as tname,user.id as tId,enrolment.enroled_date,s.name as sname,s.id as sId from enrolment left join course on course.id= enrolment.course_id Inner join teacher on course.teacher_id=teacher.id Inner Join user on teacher.user_id=user.id Inner Join user as s on enrolment.user_id = s.id;";
 
   db.query(sqlInsert2, (err, result) => {
     if (err) {
@@ -521,11 +688,11 @@ db.query(sqlInsert,[data.course_id, data.user_id], (err, result) => {
 
 
 //get Wishlist for user
-app.get("/api/wishlistCourses", (req, res) => {
-  const data = req.body.data;
-  const sqlInsert2 = "select course.* from course,wishlist where course.id=wishlist.course_id and wishlist.user_id =?;";
+app.get("/api/wishlistCourses/:id", (req, res) => {
+  const id = req.params.id;
+  const sqlInsert2 = "select course.*,user.name from course Inner join teacher on course.teacher_id=teacher.id Inner Join user on teacher.user_id=user.id Inner join wishlist on wishlist.course_id = course.id where wishlist.user_id =?;";
 
-  db.query(sqlInsert2,[data.user_id], (err, result) => {
+  db.query(sqlInsert2,[id], (err, result) => {
     if (err) {
       console.log(err);
     } else {
@@ -535,12 +702,29 @@ app.get("/api/wishlistCourses", (req, res) => {
   });
 });
 
-//delete Wishlist for user
-app.delete("/api/deleteWishlistCourse", (req, res) => {
+//get Wishlist for user for a course
+app.post("/api/wishlistCourseForUser", (req, res) => {
   const data = req.body.data;
-  const sqlInsert2 = "delete  from  wishlist where id= ?;";
+  const sqlInsert2 = "select * from wishlist where wishlist.course_id = ? and wishlist.user_id =?;";
 
-  db.query(sqlInsert2,[data.id], (err, result) => {
+  db.query(sqlInsert2,[data.course_id,data.user_id], (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
+
+
+//delete Wishlist for user
+app.delete("/api/deleteWishlistCourse/:id/:user_id", (req, res) => {
+  const id = req.params.id;
+  const user_id = req.params.user_id;
+  const sqlInsert2 = "delete  from  wishlist where course_id= ? and user_id= ?;";
+
+  db.query(sqlInsert2,[id,user_id], (err, result) => {
     if (err) {
       console.log(err);
     } else {
@@ -582,14 +766,14 @@ app.post("/api/courseratingByUser", (req, res) => {
     } else {
       if (rows.length > 0) {
         // User has already rated this course
-        res.status(400).send("User has already rated this course");
+        res.status(400).send("You have already rated this course");
       } else {
         // User has not rated this course; proceed with inserting the new rating
         const sqlInsert =
-          "INSERT INTO rating (course_id, user_id, description, level, date_added) VALUES (?, ?, ?, ?, ?)";
+          "INSERT INTO rating (course_id, user_id, comment, rating, date_added) VALUES (?, ?, ?, ?, ?)";
         db.query(
           sqlInsert,
-          [data.course_id, data.user_id, data.description, data.level, formattedDate],
+          [data.course_id, data.user_id, data.comment, data.rating, formattedDate],
           (insertErr, result) => {
             if (insertErr) {
               console.log(insertErr);
@@ -610,7 +794,7 @@ app.post("/api/courseratingByUser", (req, res) => {
 app.get("/api/getRatingForCourse/:id", (req, res) => {
   // const data = req.body.data;
   const id = req.params.id;
-  const sqlInsert2 = "select * from rating  where course.id=?;";
+  const sqlInsert2 = "select rating.id,rating.rating,rating.comment,rating.date_added,user.name from rating  left join course on rating.course_id = course.id left join user on rating.user_id = user.id where course.id=?;";
 
   db.query(sqlInsert2,[id], (err, result) => {
     if (err) {
@@ -626,10 +810,10 @@ app.get("/api/getRatingForCourse/:id", (req, res) => {
 //add advertisement
 app.post("/api/addAdvertisement", (req,res) =>{
   const data = req.body.data;
+  const formattedDate = getDate();
+  const sqlInsert = "Insert into advertisement(img_path,city,description,email,language,mobile,name,subject,type,state,mode,course_fee,verified,date_added) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)" ;
   
-  const sqlInsert = "Insert into advertisement(img_path,city,description,email,language,mobile,name,subject,type,state) values (?,?,?,?,?,?,?,?,?,?)" ;
-  
-  db.query(sqlInsert,[data.img_path, data.city,data.description,data.email,data.language,data.mobile,data.name,data.subject,data.type,data.state], (err, result) => {
+  db.query(sqlInsert,[data.img_path, data.city,data.description,data.email,data.language,data.mobile,data.name,data.subject,data.type,data.state,data.course_fee,data.mode,0,formattedDate], (err, result) => {
     if (err) {
       console.log(err);
     } else {
@@ -639,9 +823,53 @@ app.post("/api/addAdvertisement", (req,res) =>{
   });
   });
   
+  //verify ad
+app.put("/api/verifyAd/:id", (req, res) => {
+  const id = req.params.id;
+  
+  const sqlInsert1 = "update advertisement set verified=1  where id=?;";
+  db.query(sqlInsert1, [id], (err, result) => {
+      if (err) {
+        console.log(err);
+      } else {
+        res.send(result);
+        console.log(result);
+      }
+    }
+  );
+});
 
 //get All advertisements
 app.get("/api/getAllAdvertisement", (req, res) => {
+  const sqlInsert2 = "select * from advertisement WHERE state = 'Paid';";
+
+  db.query(sqlInsert2,[], (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
+
+//get All premium advertisements
+app.get("/api/getAllPrAdvertisement", (req, res) => {
+  const sqlInsert2 = "select * from advertisement WHERE state = 'Paid' AND verified = 1 AND type = 'Premium' Order By date_added DESC ;";
+
+  db.query(sqlInsert2,[], (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
+
+
+//get All advertisements
+app.get("/api/getAllAds", (req, res) => {
   const sqlInsert2 = "select * from advertisement;";
 
   db.query(sqlInsert2,[], (err, result) => {
@@ -654,6 +882,64 @@ app.get("/api/getAllAdvertisement", (req, res) => {
   });
 });
 
+//get All verified and paid advertisements 
+app.get("/api/getAllAdvertisements", (req, res) => {
+  let sqlQuery = "SELECT * from advertisement WHERE state = 'Paid' AND verified = 1 ";
+
+  // Extract query parameters from the request object
+  const { subject, language, city,mode,courseFee } = req.query;
+
+  // Construct the WHERE clause based on the selected dropdown values
+  let whereClause = [];
+  if (subject && subject !== 'all') {
+    whereClause.push(`advertisement.subject = '${subject}'`);
+  }
+  if (language && language !== 'all') {
+    whereClause.push(`advertisement.language = '${language}'`);
+  }
+  if (city && city != 'Any') {
+    whereClause.push(`advertisement.city = '${city}'`);
+  }
+  if(mode && mode !='all'){
+    whereClause.push(`advertisement.mode = '${mode}'`);
+  }
+
+
+  // if (searchTerm) {
+  //   whereClause.push(`(course.title LIKE '%${searchTerm}%' OR course.subject LIKE '%${searchTerm}%' OR course.language LIKE '%${searchTerm}%')`);
+  // }
+
+  // Add the WHERE clause to the SQL query if any filters are applied
+  if (whereClause.length > 0) {
+    sqlQuery +=  " AND " + whereClause.join(" AND ");
+  }
+
+  // // Append the ORDER BY clause based on the selected sorting option
+  if (courseFee === "lowest") {
+    sqlQuery += " ORDER BY advertisement.course_fee ASC";
+  } else if (courseFee === "highest") {
+    sqlQuery += " ORDER BY advertisement.course_fee DESC";
+  // } else if (sortBy === "toprated") {
+  //   sqlQuery += " ORDER BY avg_rating DESC";
+  // } 
+  // else if (sortBy === "popular") {
+  //   sqlQuery += " ORDER BY enrolmentCount DESC";
+  } else {
+    // Default sorting by course ID or any other default criteria
+    sqlQuery += " ORDER BY advertisement.id DESC";
+  }
+
+  // Execute the constructed SQL query
+  db.query(sqlQuery, (err, result) => {
+    if (err) {
+      console.log(err);
+      res.status(500).send("Internal Server Error");
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
 
 //get Advertisment for an ad type
 app.get("/api/getAdvertisement", (req, res) => {
@@ -756,6 +1042,90 @@ app.put("/api/editDoubt", (req, res) => {
   );
 });
 
+//report a doubt
+app.post("/api/reportOrLikeDoubt", (req, res) => {
+  const data = req.body.data;
+
+  // Check if there is already an existing row with the given answer_id and user_id
+  const sqlCheck = "SELECT * FROM answer_report WHERE answer_id = ? AND user_id = ?";
+  db.query(sqlCheck, [data.answer_id, data.user_id], (err, rows) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).send("Internal Server Error");
+    }
+
+    if (rows.length > 0) {
+      // If a row exists, update it
+      const sqlUpdate = "UPDATE answer_report SET reason = ?, isLiked = ? WHERE answer_id = ? AND user_id = ?";
+      db.query(sqlUpdate, [data.reason, data.isLiked, data.answer_id, data.user_id], (err, result) => {
+        if (err) {
+          console.error(err);
+          return res.status(500).send("Internal Server Error");
+        }
+        console.log("Row updated:", result);
+        res.send(result);
+      });
+    } else {
+      // If no row exists, insert a new row
+      const sqlInsert = "INSERT INTO answer_report (answer_id, reason, isLiked, user_id) VALUES (?, ?, ?, ?)";
+      db.query(sqlInsert, [data.answer_id, data.reason, data.isLiked, data.user_id], (err, result) => {
+        if (err) {
+          console.error(err);
+          return res.status(500).send("Internal Server Error");
+        }
+        console.log("New row inserted:", result);
+        res.send(result);
+      });
+    }
+  });
+});
+
+
+//get report doubt details for answer
+app.get("/api/reportOrLikeDoubtForUser", (req, res) => {
+  const data =  req.query.data;
+  const sqlInsert2 = "Select * from answer_report left join user on user.id=answer_report.user_id where answer_id = ? AND user_id= ? ;";
+
+  db.query(sqlInsert2,[data.answer_id,data.user_id], (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
+
+//get report doubt details for answer
+app.get("/api/likeCountForAnswer/:id", (req, res) => {
+  const id =  req.params.id;
+  const sqlInsert2 = "Select count(id) from answer_report where answer_id = ?;";
+
+  db.query(sqlInsert2,[id], (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
+
+
+// //get report doubt details for answer
+// app.post("/api/likeAnswer", (req, res) => {
+//   const id =  req.body.data;
+//   const sqlInsert2 = "insert into  answer_report(answer_id,reason,isLiked,user_id) values (?,?,?,?) where answer_id = ?;";
+
+//   db.query(sqlInsert2,[id], (err, result) => {
+//     if (err) {
+//       console.log(err);
+//     } else {
+//       res.send(result);
+//       console.log(result);
+//     }
+//   });
+// });
 
 //deleteDoubt
 app.delete("/api/deleteDoubt", (req, res) => {
@@ -774,11 +1144,13 @@ app.delete("/api/deleteDoubt", (req, res) => {
 
 //get answer for doubt
 app.get("/api/getAllAnswersForDoubt", (req,res) =>{
-  const id = req.query.doubt_id;
+  const doubt_id = req.query.doubt_id;
+  const user_id = req.query.user_id;
+  const sqlInsert = "Select answer.*,user.name,(Select count(id) from answer_report where answer_id = answer.id AND isliked = 1) AS likeCount, "
+  + " (SELECT answer_report.isLiked  FROM answer_report WHERE answer_id = answer.id AND user_id = ?) AS isLiked, "
+  + " ( SELECT answer_report.reason FROM answer_report WHERE answer_id = answer.id AND user_id = ? ) AS reason from answer Inner join doubt on answer.doubt_id = doubt.id Inner join user on answer.user_id = user.id where answer.doubt_id = ?" ;
   
-  const sqlInsert = "Select answer.*,user.name from answer Inner join doubt on answer.doubt_id = doubt.id Inner join user on answer.user_id = user.id where answer.doubt_id = ?" ;
-  
-  db.query(sqlInsert,[id], (err, result) => {
+  db.query(sqlInsert,[user_id,user_id,doubt_id], (err, result) => {
     if (err) {
       console.log(err);
     } else {
@@ -946,8 +1318,8 @@ app.delete("/api/deleteGroup/:id", (req, res) => {
 });
 
 //getSubtopic by courseId
-app.get("/api/subTopicbyCourseId", (req, res) => {
-  const id = req.query.id;
+app.get("/api/subTopicbyCourseId/:id", (req, res) => {
+  const id = req.params.id;
   const sqlInsert2 = "select sub_topic.* from sub_topic where course_id =? ;";
 
   db.query(sqlInsert2,[id], (err, result) => {
@@ -962,7 +1334,7 @@ app.get("/api/subTopicbyCourseId", (req, res) => {
 
 //get All Sub topic
 app.get("/api/subTopic", (req, res) => {
-  const sqlInsert2 = "select sub_topic.*,course.title as courseName,course.id   from sub_topic Inner join course on course.id=sub_topic.course_id;";
+  const sqlInsert2 = "select sub_topic.*,course.title as courseName   from sub_topic Inner join course on course.id=sub_topic.course_id;";
 
   db.query(sqlInsert2, (err, result) => {
     if (err) {
@@ -977,7 +1349,7 @@ app.get("/api/subTopic", (req, res) => {
 //get All Sub topic For all Courses for 1 teacher
 app.get("/api/subTopicForTeacher/:id", (req, res) => {
   const id = req.params.id;
-  const sqlInsert2 = "select sub_topic.*,course.title as courseName,course.id   from sub_topic Inner join course on course.id=sub_topic.course_id Inner join teacher on teacher.id = course.teacher_id Inner where teacher.user_id = ?;";
+  const sqlInsert2 = "select sub_topic.*,course.title as courseName,course.id   from sub_topic Inner join course on course.id=sub_topic.course_id Inner join teacher on teacher.id = course.teacher_id where teacher.user_id = ?;";
 
   db.query(sqlInsert2,[id], (err, result) => {
     if (err) {
@@ -989,13 +1361,14 @@ app.get("/api/subTopicForTeacher/:id", (req, res) => {
   });
 });
 
+
 //add subtopic
 app.post("/api/addSubtopic", (req,res) =>{
   const data = req.body.data;
   
-  const sqlInsert = "Insert into sub_topic(title,file_path,file_type,course_id) values (?,?,?)" ;
+  const sqlInsert = "Insert into sub_topic(title,description,file_path,file_type,course_id) values (?,?,?,?,?)" ;
   
-  db.query(sqlInsert,[data.title,data.file_path,data.file_type,data.course_id], (err, result) => {
+  db.query(sqlInsert,[data.title,data.description,data.file_path,data.file_type,data.course_id], (err, result) => {
     if (err) {
       console.log(err);
     } else {
@@ -1010,9 +1383,8 @@ app.post("/api/addSubtopic", (req,res) =>{
 app.put("/api/editSubtopic", (req, res) => {
   const data = req.body.data; // send data as data: bla h blah blah
   
-  const sqlInsert1 = "update sub_topic set title=?,file_path=?, file_type=?, course_id=?  where id=?;";
-  db.query(sqlInsert1, [data.title,data.file_path,data.file_type, 
-    data.course_id, data.subtopic_id], (err, result) => {
+  const sqlInsert1 = "update sub_topic set title=?, description = ?, file_path=?, file_type=? where id=?;";
+  db.query(sqlInsert1, [data.title,data.description,data.file_path,data.file_type, data.subtopic_id], (err, result) => {
       if (err) {
         console.log(err);
       } else {
@@ -1025,11 +1397,11 @@ app.put("/api/editSubtopic", (req, res) => {
 
 
 //deleteSubtopic
-app.delete("/api/deleteSubtopic", (req, res) => {
-  const data = req.body.data;
-  const sqlInsert2 = "delete  from  subtopic where id= ?;";
+app.delete("/api/deleteSubtopic/:id", (req, res) => {
+  const id = req.params.id;
+  const sqlInsert2 = "delete  from  sub_topic where id= ?;";
 
-  db.query(sqlInsert2,[data.id], (err, result) => {
+  db.query(sqlInsert2,[id], (err, result) => {
     if (err) {
       console.log(err);
     } else {
@@ -1039,18 +1411,78 @@ app.delete("/api/deleteSubtopic", (req, res) => {
   });
 });
 
-
+//delete student
 app.delete("/api/student/:id", (req, res) => {
   const id = req.params.id;
-  const sqlInsert2 = "delete  from  user where id= ?;";
 
-  db.query(sqlInsert2,[id], (err, result) => {
+  // Check if the student is enrolled in any course
+  const checkEnrollmentQuery = "SELECT * FROM enrolment WHERE user_id = ?";
+  db.query(checkEnrollmentQuery, [id], (err, enrollmentResult) => {
     if (err) {
       console.log(err);
-    } else {
+      res.status(500).send("Error checking enrollment status");
+      return;
+    }
+
+    if (enrollmentResult.length > 0) {
+      res.status(400).send("Student is enrolled in one or more courses. Please unenroll the student from all courses before deleting their account.");
+      return;
+    }
+
+    const deleteUserQuery = "DELETE FROM user WHERE id = ?";
+    db.query(deleteUserQuery, [id], (err, result) => {
+      if (err) {
+        console.log(err);
+        res.status(500).send("Error deleting user");
+        return;
+      }
       res.send(result);
       console.log(result);
+    });
+  });
+});
+
+//delete teacher
+app.delete("/api/teacher/:id/:userId", (req, res) => {
+  const teacherId = req.params.id;
+  const userId = req.params.userId;
+
+  // Check if the teacher has any courses associated with them
+  const checkCoursesQuery = "SELECT * FROM course WHERE teacher_id = ?";
+  db.query(checkCoursesQuery, [teacherId], (err, courseResult) => {
+    if (err) {
+      console.log(err);
+      res.status(500).send("Error checking courses");
+      return;
     }
+
+    // If there are courses associated with the teacher, send an error response
+    if (courseResult.length > 0) {
+      res.status(400).send("Teacher has one or more courses associated with them. Please delete all courses associated with this teacher before deleting the teacher's account.");
+      return;
+    }
+
+    // If no courses are associated, proceed with deleting the teacher
+    const deleteUserQuery = "DELETE FROM teacher WHERE user_id = ?";
+    db.query(deleteUserQuery, [userId], (err, result) => {
+      if (err) {
+        console.log(err);
+        res.status(500).send("Error deleting teacher");
+        return;
+      }
+      // If the teacher is successfully deleted, delete the corresponding user from the user table
+      const deleteRelatedUserQuery = "DELETE FROM user WHERE id = ?";
+      db.query(deleteRelatedUserQuery, [userId], (err, userResult) => {
+        if (err) {
+          console.log(err);
+          res.status(500).send("Error deleting related user");
+          return;
+        }
+        // Send a success response if both deletions were successful
+        res.send({ teacherResult: result, userResult });
+        console.log("Teacher and related user deleted successfully");
+      });
+    });
   });
 });
 
@@ -1160,15 +1592,265 @@ app.put("/api/editUser", (req, res) => {
 });
 
 
+// //get Income for admin
+// app.get("/api/getIncomeForAdmin", (req, res) => {
+//   const sqlInsert2 = "select SUM((course.amount)*0.3) AS income from enrolment left join course on enrolment.course_id = course.id;";
+
+//   db.query(sqlInsert2, (err, result) => {
+//     if (err) {
+//       console.log(err);
+//     } else {
+//       res.send(result);
+//       console.log(result[0]);
+//     }
+//   });
+// });
+
+//get Income for admin
+app.get("/api/getIncomeForAdmin", (req, res) => {
+  const currentMonth = new Date().getMonth() + 1;
+  const { month, year } = req.query;
+  let sqlQuery = "SELECT SUM((course.amount) * 0.3) AS income FROM enrolment LEFT JOIN course ON enrolment.course_id = course.id ";
+
+  // Check if month and year parameters are provided
+  if (month && year) {
+    sqlQuery += ` AND MONTH(STR_TO_DATE(enroled_date, '%Y-%m-%d')) = MONTH(STR_TO_DATE('${year}-${month}-01', '%Y-%m-%d'))`;
+    sqlQuery += ` AND YEAR(STR_TO_DATE(enroled_date, '%Y-%m-%d')) = YEAR(STR_TO_DATE('${year}-${month}-01', '%Y-%m-%d'))`;
+  }
+  else if (year) {
+    sqlQuery += ` AND YEAR(STR_TO_DATE(enroled_date, '%Y-%m-%d')) = YEAR(STR_TO_DATE('${year}-01-01', '%Y-%m-%d'))`;
+  }
+  db.query(sqlQuery, (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
+
+
+//get Income for teacher
+app.get("/api/getIncomeForTeacher/:id", (req, res) => {
+  const id = req.params.id;
+  const sqlInsert2 = "select SUM((course.amount)*0.7) AS income from enrolment left join course on enrolment.course_id = course.id Inner join teacher on course.teacher_id = teacher.id where teacher.user_id = ? ;";
+
+  db.query(sqlInsert2,[id], (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
+
+//get Income for ads
+app.get("/api/getIncomeForAds", (req, res) => {
+  const { month,year } = req.query;
+  
+  // Modify the SQL query to filter by the month if provided
+  let sqlQuery = "SELECT SUM(CASE WHEN type = 'premium' THEN 1000 ELSE 500 END) AS income FROM advertisement WHERE state = 'paid'";
+  if (month && year) {
+    sqlQuery += ` AND MONTH(STR_TO_DATE(date_added, '%Y-%m-%d')) = MONTH(STR_TO_DATE('${year}-${month}-01', '%Y-%m-%d'))`;
+    sqlQuery += ` AND YEAR(STR_TO_DATE(date_added, '%Y-%m-%d')) = YEAR(STR_TO_DATE('${year}-${month}-01', '%Y-%m-%d'))`;
+  }
+  else if (year) {
+    sqlQuery += ` AND YEAR(STR_TO_DATE(date_added, '%Y-%m-%d')) = YEAR(STR_TO_DATE('${year}-01-01', '%Y-%m-%d'))`;
+  }
+
+  db.query(sqlQuery, (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
+
+//get course and revenue for report
+app.get("/api/getRevenueDetais", (req, res) => {
+  const { month,user_id } = req.query;
+  
+  // Modify the SQL query to filter by the month if provided
+  let sqlQuery = "Select course.*,(Select Count(*) FROM enrolment where enrolment.course_id =course.id AND  SUBSTRING(enroled_date, 6, 2) = ? ) AS enrolmentCount from course inner join teacher on teacher.id = course.teacher_id inner join user on user.id = teacher.user_id where teacher.user_id = ?";
+
+  db.query(sqlQuery,[month,user_id], (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
+
+//get course and revenue for report
+app.get("/api/getRevenueDetailsForAll", (req, res) => {
+  const { month,user_id,year } = req.query;
+  
+  // Modify the SQL query to filter by the month if provided
+  let sqlQuery = "Select course.*,(Select Count(*) FROM enrolment where enrolment.course_id =course.id AND  SUBSTRING(enroled_date, 6, 2) = ? AND SUBSTRING(enroled_date, 1, 4) = ? ) AS enrolmentCount,user.name as tname from course inner join teacher on teacher.id = course.teacher_id inner join user on user.id = teacher.user_id";
+
+  db.query(sqlQuery,[month,year], (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
+
+// //get Revenue for ads
+// app.get("/api/getIncomeByCourseId", (req, res) => {
+
+//   const currentMonth = new Date().getMonth() + 1; // Get current month (1-indexed)
+// const course_id = req.query.course_id;
+// console.log(course_id);
+
+// // Calculate the range of months (3 months before and 3 months after the current month)
+// let startMonth = currentMonth - 3;
+// let endMonth = currentMonth + 3;
+// // if (startMonth <= 0) {
+// //   startMonth += 12;
+// // }
+// // if (endMonth <= 0) {
+// //   endMonth += 12;
+// // }
+
+// // Generate an array of month labels for the range
+// const monthLabels = [];
+// for (let i = startMonth; i <= endMonth; i++) {
+//   const month = i > 0 ? (i < 10 ? `0${i}` : `${i}`) : (i + 12); // Adjust for negative months
+//   monthLabels.push(month);
+// }
+  
+//   // Modify the SQL query to filter by the month if provided
+//   // let sqlQuery = "(SELECT COUNT(*) FROM enrolment WHERE enrolment.course_id = course.id AND SUBSTRING(enroled_date, 6, 2) = ?) AS enrolmentCount, (course.amount * 0.7 * (SELECT COUNT(*) FROM enrolment WHERE enrolment.course_id = course.id AND SUBSTRING(enroled_date, 6, 2) = ?)) AS revenue from course where course.id = ? ";
+//   let sqlQuery = "SELECT course.id, course.title, ";
+//   for (let i = startMonth; i <= endMonth; i++) {
+//     console.log(startMonth);
+//     console.log(endMonth);
+//     let adjustedMonth = i % 12; // Ensure the adjusted month falls within 1 to 12
+//     if (adjustedMonth <= 0) adjustedMonth += 12; // If adjusted month is 0 or negative, add 12
+//     // sqlQuery += `(course.amount * 0.7 * (SELECT COUNT(*) FROM enrolment WHERE enrolment.course_id = course.id AND SUBSTRING(enroled_date, 6, 2) = '${i < 10 ? `0${i}` : `${i}`}')) AS revenue_${i}, `;
+//      sqlQuery += `(course.amount * 0.7 * (SELECT COUNT(*) FROM enrolment WHERE enrolment.course_id = course.id AND SUBSTRING(enroled_date, 6, 2) = '${adjustedMonth < 10 ? `0${adjustedMonth}` : `${adjustedMonth}`}')) AS revenue_${adjustedMonth}, `;
+//   }
+//   sqlQuery = sqlQuery.slice(0, -2); // Remove trailing comma
+  
+//   // Append the rest of the SQL query
+//   sqlQuery += ` FROM course WHERE course.id = ${course_id}`;
+//   db.query(sqlQuery, (err, result) => {
+//     if (err) {
+//       console.log(err);
+//     } else {
+//       res.send(result);
+//       console.log(result);
+//     }
+//   });
+// });
+
+app.get("/api/getIncomeByCourseId", (req, res) => {
+  const currentDate = new Date();
+  const currentMonth = currentDate.getMonth() + 1; // Get current month (1-indexed)
+  const currentYear = currentDate.getFullYear();
+  const course_id = req.query.course_id;
+
+  // Calculate the range of months (3 months before and after the current month)
+  let startMonth, endMonth;
+  if (currentMonth >= 4) {
+      startMonth = currentMonth - 3;
+      endMonth = currentMonth + 3;
+  } else {
+      startMonth = currentMonth - 3 + 12; // Adjust for months before April
+      endMonth = currentMonth + 3;
+  }
+
+  // Generate an array of month labels for the range
+  const monthLabels = [];
+  for (let i = startMonth; i <= endMonth; i++) {
+    console.log(i);
+    let adjustedMonth = i; // Month index without adjustments
+    let adjustedYear = currentYear; // Year without adjustments
+
+    // Adjust the year if the month is less than 1 (January) or greater than 12 (December)
+    if (adjustedMonth < 1) {
+        adjustedMonth += 12;
+        adjustedYear--;
+    } else if (adjustedMonth > 12) {
+        adjustedMonth -= 12;
+        adjustedYear++;
+    }
+      const month = adjustedMonth < 10 ? `0${adjustedMonth}` : `${adjustedMonth}`;
+      monthLabels.push(`${adjustedYear}-${month}`);
+  }
+
+  console.log(monthLabels);
+  // Construct the SQL query
+  let sqlQuery = `SELECT course.id, course.title, `;
+  monthLabels.forEach((month) => {
+    const monthNumber = parseInt(month.split('-')[1]); 
+      sqlQuery += `(course.amount * 0.7 * (SELECT COUNT(*) FROM enrolment WHERE enrolment.course_id = course.id AND SUBSTRING(enroled_date, 1, 7) = '${month}')) AS revenue_${monthNumber}, `;
+  });
+  sqlQuery = sqlQuery.slice(0, -2); // Remove trailing comma
+  sqlQuery += ` FROM course WHERE course.id = ${course_id}`;
+
+  // Execute the query
+  db.query(sqlQuery, (err, result) => {
+      if (err) {
+          console.log(err);
+          res.status(500).send("Internal Server Error");
+      } else {
+          console.log(result);
+          res.send(result);
+      }
+  });
+});
 
 
 
 
 
+app.get("/api/getIncomeForAdminDash", (req, res) => {
+  const currentDate = new Date();
+  const currentMonth = currentDate.getMonth() + 1;
+  const currentYear = currentDate.getFullYear();
+  let sqlQuery = "SELECT SUM((course.amount) * 0.3) AS income FROM enrolment LEFT JOIN course ON enrolment.course_id = course.id where SUBSTRING(enroled_date, 6, 2) = ?  AND SUBSTRING(enroled_date, 1, 4) = ? ";
+  
+  db.query(sqlQuery,[currentMonth,currentYear], (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
 
 
 
+//get Income for ads
+app.get("/api/getIncomeForAdsDash", (req, res) => {
+  const currentDate = new Date();
+  const currentMonth = currentDate.getMonth() + 1;
+  const currentYear = currentDate.getFullYear();
+  
+  // Modify the SQL query to filter by the month if provided
+  let sqlQuery = "SELECT SUM(CASE WHEN type = 'premium' THEN 1000 ELSE 500 END) AS income FROM advertisement WHERE state = 'paid' AND SUBSTRING(date_added, 6, 2) = ?  AND SUBSTRING(date_added, 1, 4) = ? ";
 
+
+  db.query(sqlQuery,[currentMonth,currentYear], (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
 
 
 
