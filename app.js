@@ -37,12 +37,21 @@ const getDateString = (dateString) => {
   return yyyy + "-" + mm + "-" + dd;
   };
 
-function getDate(){
-  const today = new Date();
-const formatDate = today.toISOString().split('T')[0];
-console.log(formatDate);
-return formatDate;
+// function getDate(){
+//   const today = new Date();
+// const formatDate = today.toISOString().split('T')[0];
+// console.log(formatDate);
+// return formatDate;
 
+// }
+
+function getDate() {
+  const today = new Date();
+  // Convert to Sri Lanka time zone
+  const sriLankaDate = new Date(today.toLocaleString('en-US', { timeZone: 'Asia/Colombo' }));
+  const formatDate = sriLankaDate.toISOString().split('T')[0];
+  console.log(formatDate);
+  return formatDate;
 }
 
 app.get("/", (req, res) => {
@@ -811,9 +820,10 @@ app.get("/api/getRatingForCourse/:id", (req, res) => {
 app.post("/api/addAdvertisement", (req,res) =>{
   const data = req.body.data;
   const formattedDate = getDate();
-  const sqlInsert = "Insert into advertisement(img_path,city,description,email,language,mobile,name,subject,type,state,mode,course_fee,verified,date_added) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)" ;
+  const datePaid = data.state === 'Paid' ? formattedDate : null;
+  const sqlInsert = "Insert into advertisement(img_path,city,description,email,language,mobile,name,subject,type,state,mode,course_fee,verified,date_added,date_paid) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)" ;
   
-  db.query(sqlInsert,[data.img_path, data.city,data.description,data.email,data.language,data.mobile,data.name,data.subject,data.type,data.state,data.course_fee,data.mode,0,formattedDate], (err, result) => {
+  db.query(sqlInsert,[data.img_path, data.city,data.description,data.email,data.language,data.mobile,data.name,data.subject,data.type,data.state,data.course_fee,data.mode,0,formattedDate,datePaid], (err, result) => {
     if (err) {
       console.log(err);
     } else {
@@ -960,11 +970,13 @@ app.get("/api/getAdvertisement", (req, res) => {
 //edit advertisement
 app.put("/api/editAd", (req, res) => {
   const data = req.body.data; // send data as data: blah blah blah
-  console.log(data);
-  const sqlInsert1 = "update advertisement set img_path=? ,city=?, description=?,email=?, language=?, mobile=?,name=?, subject=?,type=?, state=?  where id=?;";
+  console.log('kxkkx',data);
+  const formattedDate = getDate();
+  const datePaid = data.state == 'Paid' ? (data.date_paid == '' ? formattedDate : data.date_paid ): null;
+  const sqlInsert1 = "update advertisement set img_path=? ,city=?, description=?,email=?, language=?, mobile=?,name=?, subject=?,type=?, state=?,date_paid=?  where id=?;";
   db.query(sqlInsert1, [data.img_path, 
     data.city, data.description, data.email,data.language,data.mobile,data.name,data.subject, 
-    data.type,data.state,data.id], (err, result) => {
+    data.type,data.state,datePaid,data.id], (err, result) => {
       if (err) {
         console.log(err);
       } else {
@@ -999,6 +1011,21 @@ app.get("/api/getAllDoubts", (req,res) =>{
   const sqlInsert = "Select doubt.*,user.name from doubt Inner join user on doubt.user_id = user.id where group_id = ?" ;
   
   db.query(sqlInsert,[id], (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+  });
+
+  //get all doubts for group
+app.get("/api/getAllGroupsDoubts", (req,res) =>{
+
+  const sqlInsert = "Select doubt.*,user.name, (Select name from groups where id = doubt.group_id) AS groupName, (Select name from user where id = doubt.user_id) AS postedBy  from doubt Inner join user on doubt.user_id = user.id " ;
+  
+  db.query(sqlInsert,[], (err, result) => {
     if (err) {
       console.log(err);
     } else {
@@ -1082,11 +1109,11 @@ app.post("/api/reportOrLikeDoubt", (req, res) => {
 
 
 //get report doubt details for answer
-app.get("/api/reportOrLikeDoubtForUser", (req, res) => {
-  const data =  req.query.data;
-  const sqlInsert2 = "Select * from answer_report left join user on user.id=answer_report.user_id where answer_id = ? AND user_id= ? ;";
+app.get("/api/reportOrLikeDoubtForUser/:id", (req, res) => {
+  const id = req.params.id;
+  const sqlInsert2 = "Select * from answer_report left join user on user.id=answer_report.user_id where answer_id = ? AND reason IS NOT NULL AND reason !='';";
 
-  db.query(sqlInsert2,[data.answer_id,data.user_id], (err, result) => {
+  db.query(sqlInsert2,[id], (err, result) => {
     if (err) {
       console.log(err);
     } else {
@@ -1128,16 +1155,32 @@ app.get("/api/likeCountForAnswer/:id", (req, res) => {
 // });
 
 //deleteDoubt
-app.delete("/api/deleteDoubt", (req, res) => {
-  const data = req.body.data;
-  const sqlInsert2 = "delete  from  doubt where id= ?;";
-
-  db.query(sqlInsert2,[data.id], (err, result) => {
+app.delete("/api/deleteDoubt/:id", (req, res) => {
+  const doubtId = req.params.id;
+  const sqlCheckAnswers = "SELECT COUNT(*) AS numAnswers FROM answer WHERE doubt_id = ?";
+  db.query(sqlCheckAnswers, [doubtId], (err, answerResult) => {
     if (err) {
       console.log(err);
+      res.status(500).send("Error checking answers.");
     } else {
-      res.send(result);
-      console.log(result);
+      const numAnswers = answerResult[0].numAnswers;
+
+
+      if (numAnswers === 0) {
+        const sqlDeleteDoubt = "DELETE FROM doubt WHERE id = ?";
+
+        db.query(sqlDeleteDoubt, [doubtId], (deleteErr, deleteResult) => {
+          if (deleteErr) {
+            console.log(deleteErr);
+            res.status(500).send("Error deleting course.");
+          } else {
+            res.status(200).send("Doubt deleted successfully.");
+            console.log("Doubt deleted successfully.");
+          }
+        });
+      } else {
+        res.status(403).send("Cannot delete doubt with existing answers.");
+      }
     }
   });
 });
@@ -1196,16 +1239,32 @@ app.put("/api/editAnswer", (req, res) => {
 
 
 //delete Answer
-app.delete("/api/deleteAnswer", (req, res) => {
-  const data = req.body.data;
-  const sqlInsert2 = "delete  from  answer where id= ?;";
-
-  db.query(sqlInsert2,[data.id], (err, result) => {
+app.delete("/api/deleteAnswer/:id", (req, res) => {
+  const answerId = req.params.id;
+  const sqlCheckReports = "SELECT COUNT(*) AS numAnswerReports FROM answer_report WHERE answer_id = ?";
+  db.query(sqlCheckReports, [answerId], (err, answerResult) => {
     if (err) {
       console.log(err);
+      res.status(500).send("Error checking answers.");
     } else {
-      res.send(result);
-      console.log(result);
+      const numAnswers = answerResult[0].numAnswerReports;
+
+
+      if (numAnswers === 0) {
+        const sqlDeleteAnswer = "DELETE FROM answer WHERE id = ?";
+
+        db.query(sqlDeleteAnswer, [answerId], (deleteErr, deleteResult) => {
+          if (deleteErr) {
+            console.log(deleteErr);
+            res.status(500).send("Error deleting answer.");
+          } else {
+            res.status(200).send("Answer deleted successfully.");
+            console.log("Answer deleted successfully.");
+          }
+        });
+      } else {
+        res.status(403).send("Cannot delete answer with existing reports.");
+      }
     }
   });
 });
@@ -1361,6 +1420,20 @@ app.get("/api/subTopicForTeacher/:id", (req, res) => {
   });
 });
 
+//deleteEnrolment
+app.delete("/api/deleteEnrolment/:id", (req, res) => {
+  const id = req.params.id;
+  const sqlInsert2 = "delete  from  enrolment where id= ?;";
+
+  db.query(sqlInsert2,[id], (err, result) => {
+    if (err) {
+      console.log(err);
+    } else {
+      res.send(result);
+      console.log(result);
+    }
+  });
+});
 
 //add subtopic
 app.post("/api/addSubtopic", (req,res) =>{
@@ -1514,82 +1587,224 @@ app.delete("/api/teacher/:id/:userId", (req, res) => {
 
 
 //create teacher
+  // app.post("/api/createTeacher", (req, res) => {
+  //   const userData = req.body.data;
+  //   const role = "Teacher";
+  //   const uname = userData.name + "Teach";
+  
+  //   // Create a new user first
+  //   const userInsert = "INSERT INTO user (username, name, password, email,state, role) VALUES (?, ?, ? ,?, ?, ?)";
+  
+  //   db.query(userInsert, [uname,userData.name, userData.password, userData.email,"ACTIVE", role], (userErr, userResult) => {
+  //     if (userErr) {
+  //       console.log(userErr);
+  //       res.status(500).send("Error creating user");
+  //     } else {
+  //       // Use the generated user_id to create a teacher
+  //       const user_id = userResult.insertId;
+  //       const teacherData = req.body.data;
+  
+  //       const teacherInsert = "INSERT INTO teacher (qualification, city,subject, mobile_no, nic,verified, user_id) VALUES (?, ?, ?, ?, ?, ?,?)";
+  
+  //       db.query(teacherInsert, [
+  //         teacherData.qualification,
+  //         teacherData.city,
+  //         teacherData.subject,
+  //         teacherData.mobile_no,
+  //         teacherData.nic,
+  //         0,
+  //         user_id, // Use the generated user_id
+  //       ], (teacherErr, teacherResult) => {
+  //         if (teacherErr) {
+  //           console.log(teacherErr);
+  //           res.status(500).send("Error creating teacher");
+  //         } else {
+  //           res.send(teacherResult);
+  //           console.log(teacherResult);
+  //         }
+  //       });
+  //     }
+  //   });
+  // });
+  
+  
   app.post("/api/createTeacher", (req, res) => {
     const userData = req.body.data;
     const role = "Teacher";
     const uname = userData.name + "Teach";
   
-    // Create a new user first
-    const userInsert = "INSERT INTO user (username, name, password, email,state, role) VALUES (?, ?, ? ,?, ?, ?)";
+    // SQL queries to check if the email or username already exists
+    const sqlCheckEmail = "SELECT id FROM user WHERE email = ?;";
+    const sqlCheckUsername = "SELECT id FROM user WHERE username = ?;";
   
-    db.query(userInsert, [uname,userData.name, userData.password, userData.email,"ACTIVE", role], (userErr, userResult) => {
-      if (userErr) {
-        console.log(userErr);
-        res.status(500).send("Error creating user");
+    
+  
+    // Check if the email already exists
+    db.query(sqlCheckEmail, [userData.email], (emailErr, emailResults) => {
+      if (emailErr) {
+        console.log(emailErr);
+        return res.status(500).send("Error checking email");
+      }
+  
+      if (emailResults.length > 0) {
+        // Email is already taken
+        return res.status(400).send("Email is already taken");
       } else {
-        // Use the generated user_id to create a teacher
-        const user_id = userResult.insertId;
-        const teacherData = req.body.data;
+        // Check if the username already exists
+        db.query(sqlCheckUsername, [uname], (usernameErr, usernameResults) => {
+          if (usernameErr) {
+            console.log(usernameErr);
+            return res.status(500).send("Error checking username");
+          }
   
-        const teacherInsert = "INSERT INTO teacher (qualification, city,subject, mobile_no, nic,verified, user_id) VALUES (?, ?, ?, ?, ?, ?,?)";
-  
-        db.query(teacherInsert, [
-          teacherData.qualification,
-          teacherData.city,
-          teacherData.subject,
-          teacherData.mobile_no,
-          teacherData.nic,
-          0,
-          user_id, // Use the generated user_id
-        ], (teacherErr, teacherResult) => {
-          if (teacherErr) {
-            console.log(teacherErr);
-            res.status(500).send("Error creating teacher");
+          if (usernameResults.length > 0) {
+            // Username is already taken
+            return res.status(400).send("Username is already taken");
           } else {
-            res.send(teacherResult);
-            console.log(teacherResult);
+            // Proceed to create a new user
+            const userInsert = "INSERT INTO user (username, name, password, email, state, role) VALUES (?, ?, ?, ?, ?, ?)";
+  
+            db.query(userInsert, [uname, userData.name, userData.password, userData.email, "ACTIVE", role], (userErr, userResult) => {
+              if (userErr) {
+                console.log(userErr);
+                return res.status(500).send("Error creating user");
+              } else {
+                const userId = userResult.insertId; // Get the new user_id
+                createTeacher(userId); // Create teacher with the new user_id
+              }
+            });
           }
         });
       }
     });
+
+    // Function to create a new teacher if user creation is successful
+    const createTeacher = (userId) => {
+      const teacherInsert = "INSERT INTO teacher (qualification, city, subject, mobile_no, nic, verified, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)";
+  
+      db.query(teacherInsert, [
+        userData.qualification,
+        userData.city,
+        userData.subject,
+        userData.mobile_no,
+        userData.nic,
+        0,
+        userId,
+      ], (teacherErr, teacherResult) => {
+        if (teacherErr) {
+          console.log(teacherErr);
+          return res.status(500).send("Error creating teacher");
+        } else {
+          console.log(teacherResult);
+          return res.send(teacherResult);
+        }
+      });
+    };
   });
   
 
-
 // Edit user
+// app.put("/api/editUser", (req, res) => {
+//   const data = req.body.data; // Send data as data: blah blah blah
+//   console.log(data);
+//   const sqlCheckEmail = "SELECT * FROM user WHERE email = ?;";
+//   const sqlCheckUsername = "SELECT * FROM user WHERE username = ?;";
+//   const sqlUpdateUser = "UPDATE user SET email=?, name=?,username = ?, password=? WHERE id=?;";
+//   db.query(sqlUpdateUser, [data.email, data.name,data.username, data.password, data.user_id], (err, result) => {
+//     if (err) {
+//       console.log(err);
+//       res.status(500).send("Error updating user.");
+//     } else {
+//       if (data.role === "Teacher") {
+//         const sqlUpdateTeacher = "update teacher set qualification= ?,subject =? ,city=?,mobile_no=?,nic=? WHERE user_id=?;";
+//         db.query(sqlUpdateTeacher, [
+//           data.qualification,
+//           data.subject,
+//           data.city,
+//           data.mobile_no,
+//           data.nic,
+//           data.user_id], (err, teacherResult) => {
+//           if (err) {
+//             console.log(err);
+//             res.status(500).send("Error updating teacher details.");
+//           } else {
+//             console.log("User and teacher details updated successfully.");
+//             res.send(teacherResult);
+//           }
+//         });
+//       } else {
+//         console.log("User details updated successfully.");
+//         res.send(result);
+//       }
+//     }
+//   });
+// });
+
 app.put("/api/editUser", (req, res) => {
-  const data = req.body.data; // Send data as data: blah blah blah
+  const data = req.body.data; // Assuming data is sent in the format: { email: ..., username: ..., etc. }
   console.log(data);
-  const sqlUpdateUser = "UPDATE user SET email=?, name=?, password=? WHERE id=?;";
-  db.query(sqlUpdateUser, [data.email, data.name, data.password, data.user_id], (err, result) => {
+
+  const sqlCheckEmail = "SELECT id FROM user WHERE email = ? AND id != ?;";
+  const sqlCheckUsername = "SELECT id FROM user WHERE username = ? AND id != ?;";
+  const sqlUpdateUser = "UPDATE user SET email=?, name=?, username=?, password=? WHERE id=?;";
+  const sqlUpdateTeacher = "UPDATE teacher SET qualification=?, subject=?, city=?, mobile_no=?, nic=? WHERE user_id=?;";
+
+  // Check if the email is already taken by another user
+  db.query(sqlCheckEmail, [data.email, data.user_id], (err, emailResults) => {
     if (err) {
       console.log(err);
-      res.status(500).send("Error updating user.");
-    } else {
-      if (data.role === "Teacher") {
-        const sqlUpdateTeacher = "update teacher set qualification= ?,subject =? ,city=?,mobile_no=?,nic=? WHERE user_id=?;";
-        db.query(sqlUpdateTeacher, [
-          data.qualification,
-          data.subject,
-          data.city,
-          data.mobile_no,
-          data.nic,
-          data.user_id], (err, teacherResult) => {
-          if (err) {
-            console.log(err);
-            res.status(500).send("Error updating teacher details.");
-          } else {
+      return res.status(500).send("Error checking email.");
+    }
+
+    if (emailResults.length > 0) {
+      return res.status(400).send("Email is already in use.");
+    }
+
+    // Check if the username is already taken by another user
+    db.query(sqlCheckUsername, [data.username, data.user_id], (err, usernameResults) => {
+      if (err) {
+        console.log(err);
+        return res.status(500).send("Error checking username.");
+      }
+
+      if (usernameResults.length > 0) {
+        return res.status(400).send("Username is already in use.");
+      }
+
+      // Proceed with updating the user
+      db.query(sqlUpdateUser, [data.email, data.name, data.username, data.password, data.user_id], (err, result) => {
+        if (err) {
+          console.log(err);
+          return res.status(500).send("Error updating user.");
+        }
+
+        if (data.role === "Teacher") {
+          // Update teacher details if the user is a teacher
+          db.query(sqlUpdateTeacher, [
+            data.qualification,
+            data.subject,
+            data.city,
+            data.mobile_no,
+            data.nic,
+            data.user_id
+          ], (err, teacherResult) => {
+            if (err) {
+              console.log(err);
+              return res.status(500).send("Error updating teacher details.");
+            }
+
             console.log("User and teacher details updated successfully.");
             res.send(teacherResult);
-          }
-        });
-      } else {
-        console.log("User details updated successfully.");
-        res.send(result);
-      }
-    }
+          });
+        } else {
+          console.log("User details updated successfully.");
+          res.send(result);
+        }
+      });
+    });
   });
 });
+
 
 
 // //get Income for admin
@@ -1634,9 +1849,12 @@ app.get("/api/getIncomeForAdmin", (req, res) => {
 //get Income for teacher
 app.get("/api/getIncomeForTeacher/:id", (req, res) => {
   const id = req.params.id;
-  const sqlInsert2 = "select SUM((course.amount)*0.7) AS income from enrolment left join course on enrolment.course_id = course.id Inner join teacher on course.teacher_id = teacher.id where teacher.user_id = ? ;";
+  const currentDate = new Date();
+  const currentMonth = currentDate.getMonth() + 1;
+  const currentYear = currentDate.getFullYear();
+  const sqlInsert2 = "select SUM((course.amount)*0.7) AS income from enrolment left join course on enrolment.course_id = course.id Inner join teacher on course.teacher_id = teacher.id where teacher.user_id = ? AND SUBSTRING(enroled_date, 6, 2) = ?  AND SUBSTRING(enroled_date, 1, 4) = ? ;";
 
-  db.query(sqlInsert2,[id], (err, result) => {
+  db.query(sqlInsert2,[id,currentMonth,currentYear], (err, result) => {
     if (err) {
       console.log(err);
     } else {
@@ -1653,13 +1871,14 @@ app.get("/api/getIncomeForAds", (req, res) => {
   // Modify the SQL query to filter by the month if provided
   let sqlQuery = "SELECT SUM(CASE WHEN type = 'premium' THEN 1000 ELSE 500 END) AS income FROM advertisement WHERE state = 'paid'";
   if (month && year) {
-    sqlQuery += ` AND MONTH(STR_TO_DATE(date_added, '%Y-%m-%d')) = MONTH(STR_TO_DATE('${year}-${month}-01', '%Y-%m-%d'))`;
-    sqlQuery += ` AND YEAR(STR_TO_DATE(date_added, '%Y-%m-%d')) = YEAR(STR_TO_DATE('${year}-${month}-01', '%Y-%m-%d'))`;
+    sqlQuery += ` AND MONTH(STR_TO_DATE(date_paid, '%Y-%m-%d')) = MONTH(STR_TO_DATE('${year}-${month}-01', '%Y-%m-%d'))`;
+    sqlQuery += ` AND YEAR(STR_TO_DATE(date_paid, '%Y-%m-%d')) = YEAR(STR_TO_DATE('${year}-${month}-01', '%Y-%m-%d'))`;
   }
   else if (year) {
-    sqlQuery += ` AND YEAR(STR_TO_DATE(date_added, '%Y-%m-%d')) = YEAR(STR_TO_DATE('${year}-01-01', '%Y-%m-%d'))`;
+    sqlQuery += ` AND YEAR(STR_TO_DATE(date_paid, '%Y-%m-%d')) = YEAR(STR_TO_DATE('${year}-01-01', '%Y-%m-%d'))`;
   }
 
+  console.log('xmmm',sqlQuery);
   db.query(sqlQuery, (err, result) => {
     if (err) {
       console.log(err);
@@ -1839,7 +2058,7 @@ app.get("/api/getIncomeForAdsDash", (req, res) => {
   const currentYear = currentDate.getFullYear();
   
   // Modify the SQL query to filter by the month if provided
-  let sqlQuery = "SELECT SUM(CASE WHEN type = 'premium' THEN 1000 ELSE 500 END) AS income FROM advertisement WHERE state = 'paid' AND SUBSTRING(date_added, 6, 2) = ?  AND SUBSTRING(date_added, 1, 4) = ? ";
+  let sqlQuery = "SELECT SUM(CASE WHEN type = 'premium' THEN 1000 ELSE 500 END) AS income FROM advertisement WHERE state = 'paid' AND SUBSTRING(date_paid, 6, 2) = ?  AND SUBSTRING(date_paid, 1, 4) = ? ";
 
 
   db.query(sqlQuery,[currentMonth,currentYear], (err, result) => {
